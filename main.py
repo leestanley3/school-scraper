@@ -233,8 +233,12 @@ async def process_school(req: ScrapeRequest) -> dict:
             result["email_pattern"] = email_pattern
 
     except Exception as e:
+        import traceback
         result["status"] = "error"
         result["error"] = str(e)
+        result["traceback"] = traceback.format_exc()
+        print(f"ERROR processing {req.school_name}: {str(e)}")
+        print(traceback.format_exc())
 
     return result
 
