@@ -35,7 +35,7 @@ class BulkScrapeRequest(BaseModel):
 
 async def get_zoho_token():
     async with httpx.AsyncClient() as client:
-        r = await client.post("https://accounts.zoho.eu/oauth/v2/token", params={
+        r = await client.post("https://accounts.zoho.com/oauth/v2/token", params={
             "refresh_token": ZOHO_REFRESH_TOKEN,
             "client_id": ZOHO_CLIENT_ID,
             "client_secret": ZOHO_CLIENT_SECRET,
@@ -146,7 +146,7 @@ async def verify_email_reoon(email: str) -> dict:
 async def get_existing_contacts(account_id: str, token: str) -> list:
     async with httpx.AsyncClient() as client:
         r = await client.get(
-            f"https://www.zohoapis.eu/crm/v3/Contacts/search",
+            f"https://www.zohoapis.com/crm/v3/Contacts/search",
             headers={"Authorization": f"Zoho-oauthtoken {token}"},
             params={"criteria": f"Account_Name.id:equals:{account_id}"}
         )
@@ -175,13 +175,13 @@ async def upsert_contact(account_id: str, person: dict, role: str, email_info: d
     async with httpx.AsyncClient() as client:
         if match:
             r = await client.put(
-                f"https://www.zohoapis.eu/crm/v3/Contacts/{match['id']}",
+                f"https://www.zohoapis.com/crm/v3/Contacts/{match['id']}",
                 headers={"Authorization": f"Zoho-oauthtoken {token}", "Content-Type": "application/json"},
                 json={"data": [payload]}
             )
         else:
             r = await client.post(
-                "https://www.zohoapis.eu/crm/v3/Contacts",
+                "https://www.zohoapis.com/crm/v3/Contacts",
                 headers={"Authorization": f"Zoho-oauthtoken {token}", "Content-Type": "application/json"},
                 json={"data": [payload]}
             )
@@ -190,7 +190,7 @@ async def upsert_contact(account_id: str, person: dict, role: str, email_info: d
 async def update_account_fields(account_id: str, email_pattern: str, token: str):
     async with httpx.AsyncClient() as client:
         await client.put(
-            f"https://www.zohoapis.eu/crm/v3/Accounts/{account_id}",
+            f"https://www.zohoapis.com/crm/v3/Accounts/{account_id}",
             headers={"Authorization": f"Zoho-oauthtoken {token}", "Content-Type": "application/json"},
             json={"data": [{"id": account_id, "Email_Pattern": email_pattern, "Last_Scraped": "today"}]}
         )
