@@ -248,11 +248,12 @@ async def process_school(req: ScrapeRequest) -> dict:
 async def health():
     return {"status": "ok"}
 
-@app.post("/scrape")
-async def scrape_single(req: ScrapeRequest, x_webhook_secret: str = Header(None)):
-    if x_webhook_secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid webhook secret")
-    return await process_school(req)
+@app.get("/scrape")
+async def scrape_get(account_id: str, staff_page_url: str, school_name: str, secret: str, urn: str = None):
+    if secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid secret")
+    scrape_req = ScrapeRequest(account_id=account_id, staff_page_url=staff_page_url, school_name=school_name, urn=urn)
+    return await process_school(scrape_req)
 
 @app.post("/scrape/bulk")
 async def scrape_bulk(req: BulkScrapeRequest, x_webhook_secret: str = Header(None)):
