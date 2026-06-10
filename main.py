@@ -150,8 +150,11 @@ async def get_existing_contacts(account_id: str, token: str) -> list:
             headers={"Authorization": f"Zoho-oauthtoken {token}"},
             params={"criteria": f"Account_Name.id:equals:{account_id}"}
         )
-        data = r.json()
-        return data.get("data", [])
+        try:
+            data = r.json()
+            return data.get("data", [])
+        except:
+            return []
 
 async def upsert_contact(account_id: str, person: dict, role: str, email_info: dict, token: str):
     existing = await get_existing_contacts(account_id, token)
