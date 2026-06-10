@@ -117,7 +117,7 @@ Text to analyse:
 {clean}"""
 
     message = anthropic_client.messages.create(
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-4-20250514",
         max_tokens=1000,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -150,10 +150,12 @@ async def get_existing_contacts(account_id: str, token: str) -> list:
             headers={"Authorization": f"Zoho-oauthtoken {token}"},
             params={"criteria": f"Account_Name.id:equals:{account_id}"}
         )
+        print(f"Contact search status: {r.status_code}, body: {r.text[:200]}")
         try:
             data = r.json()
             return data.get("data", [])
-        except:
+        except Exception as e:
+            print(f"Contact search JSON error: {e}")
             return []
 
 async def upsert_contact(account_id: str, person: dict, role: str, email_info: dict, token: str):
@@ -251,11 +253,32 @@ async def process_school(req: ScrapeRequest) -> dict:
 async def health():
     return {"status": "ok"}
 
-@app.get("/scrape")
-async def scrape_get(account_id: str, staff_page_url: str, school_name: str, secret: str, urn: str = None):
-    if secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid secret")
-    scrape_req = ScrapeRequest(account_id=account_id, staff_page_url=staff_page_url, school_name=school_name, urn=urn)
+@app.post("/scrape")
+async def scrape_single(req: Request, x_webhook_secret: str = Header(None)):
+    if x_webhook_secret != WEBHOOK_SECRET:
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    content_type = req.headers.get("content-type", "")
+    if "application/json" in content_type:
+        data = await req.json()
+    else:
+        # Deluge sends form-encoded or plain string - parse either way
+        body = await req.body()
+        body_str = body.decode("utf-8")
+        print(f"Raw body received: {body_str[:500]}")
+        try:
+            data = json.loads(body_str)
+        except Exception:
+            # Try parsing as form data
+            from urllib.parse import parse_qs
+            parsed = parse_qs(body_str)
+            data = {k: v[0] for k, v in parsed.items()}
+    print(f"Parsed data: {data}")
+    scrape_req = ScrapeRequest(
+        account_id=data.get("account_id", ""),
+        staff_page_url=data.get("staff_page_url", ""),
+        school_name=data.get("school_name", ""),
+        urn=data.get("urn")
+    )
     return await process_school(scrape_req)
 
 @app.post("/scrape/bulk")
