@@ -3,6 +3,8 @@ import re
 import json
 import httpx
 import asyncio
+import logging
+import secrets
 from fastapi import FastAPI, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -18,7 +20,18 @@ REOON_API_KEY = os.environ.get("REOON_API_KEY")
 ZOHO_CLIENT_ID = os.environ.get("ZOHO_CLIENT_ID")
 ZOHO_CLIENT_SECRET = os.environ.get("ZOHO_CLIENT_SECRET")
 ZOHO_REFRESH_TOKEN = os.environ.get("ZOHO_REFRESH_TOKEN")
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "changeme123")
+WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+logger = logging.getLogger(__name__)
+
+
+def require_webhook_secret(supplied: Optional[str]) -> None:
+    # Missing or example configuration must never enable a write endpoint.
+    if not WEBHOOK_SECRET.strip() or WEBHOOK_SECRET == "changeme123":
+        raise HTTPException(status_code=503, detail="Webhook authentication is not configured")
+    if not supplied or not secrets.compare_digest(
+        supplied.encode("utf-8"), WEBHOOK_SECRET.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
 
 anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -156,13 +169,18 @@ async def get_existing_contacts(account_id: str, token: str) -> list:
             headers={"Authorization": f"Zoho-oauthtoken {token}"},
             params={"criteria": f"Account_Name.id:equals:{account_id}"}
         )
-        print(f"Contact search status: {r.status_code}, body: {r.text[:200]}")
+        r.raise_for_status()
+        if r.status_code == 204:
+            return []
         try:
             data = r.json()
-            return data.get("data", [])
-        except Exception as e:
-            print(f"Contact search JSON error: {e}")
-            return []
+            contacts = data["data"]
+            if not isinstance(contacts, list):
+                raise ValueError("Invalid contact response")
+            return contacts
+        except (ValueError, KeyError, TypeError) as e:
+            # A failed lookup is not evidence that a contact does not exist.
+            raise RuntimeError("Contact search could not be verified") from e
 
 async def upsert_contact(account_id: str, person: dict, role: str, email_info: dict, token: str):
     existing = await get_existing_contacts(account_id, token)
@@ -214,7 +232,7 @@ async def process_school(req: ScrapeRequest) -> dict:
         html = await fetch_page(req.staff_page_url)
         domain = re.sub(r'^https?://(www\.)?', '', req.staff_page_url).split('/')[0]
         email_pattern = extract_email_pattern(html, domain)
-        staff = extract_staff_with_claude(html, req.school_name)
+        staff = await asyncio.to_thread(extract_staff_with_claude, html, req.school_name)
         token = await get_zoho_token()
 
         role_map = {
@@ -244,12 +262,10 @@ async def process_school(req: ScrapeRequest) -> dict:
             result["email_pattern"] = email_pattern
 
     except Exception as e:
-        import traceback
         result["status"] = "error"
-        result["error"] = str(e)
-        result["traceback"] = traceback.format_exc()
-        print(f"ERROR processing {req.school_name}: {str(e)}")
-        print(traceback.format_exc())
+        result["error"] = "School processing failed; verify provider state before retrying"
+        # Provider errors can contain credentials, URLs and personal data.
+        logger.error("School processing failed (%s)", type(e).__name__)
 
     return result
 
@@ -261,8 +277,7 @@ async def health():
 
 @app.post("/scrape")
 async def scrape_single(req: Request, x_webhook_secret: str = Header(None)):
-    if x_webhook_secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    require_webhook_secret(x_webhook_secret)
     content_type = req.headers.get("content-type", "")
     if "application/json" in content_type:
         data = await req.json()
@@ -270,7 +285,6 @@ async def scrape_single(req: Request, x_webhook_secret: str = Header(None)):
         # Deluge sends form-encoded or plain string - parse either way
         body = await req.body()
         body_str = body.decode("utf-8")
-        print(f"Raw body received: {body_str[:500]}")
         try:
             data = json.loads(body_str)
         except Exception:
@@ -278,7 +292,6 @@ async def scrape_single(req: Request, x_webhook_secret: str = Header(None)):
             from urllib.parse import parse_qs
             parsed = parse_qs(body_str)
             data = {k: v[0] for k, v in parsed.items()}
-    print(f"Parsed data: {data}")
     scrape_req = ScrapeRequest(
         account_id=data.get("account_id", ""),
         staff_page_url=data.get("staff_page_url", ""),
@@ -289,8 +302,7 @@ async def scrape_single(req: Request, x_webhook_secret: str = Header(None)):
 
 @app.post("/scrape/bulk")
 async def scrape_bulk(req: BulkScrapeRequest, x_webhook_secret: str = Header(None)):
-    if x_webhook_secret != WEBHOOK_SECRET:
-        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    require_webhook_secret(x_webhook_secret)
     results = []
     for school in req.schools:
         result = await process_school(school)

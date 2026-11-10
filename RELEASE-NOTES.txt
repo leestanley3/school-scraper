@@ -1,0 +1,24 @@
+Security update - 10 November 2026
+
+The scraper now rejects write requests when WEBHOOK_SECRET is missing, blank,
+or set to the old example value. Configure a private secret in the hosting
+service before release. Do not put the value in source control.
+
+Both write endpoints use the same constant-time secret check. Request bodies,
+contact responses, provider error text and tracebacks are no longer printed or
+returned. Error responses keep the school identifier for reconciliation.
+
+A failed or malformed CRM contact search now stops processing. It can no longer
+be treated as evidence that no contact exists. This prevents that failure path
+from creating a duplicate contact. A successful empty result remains supported.
+
+The synchronous model request runs in a worker thread. It no longer blocks the
+API event loop while it waits for the model provider.
+
+Validation: five unittest cases passed with mocked providers and synthetic data.
+No live CRM write or model request was used in the tests.
+
+Release status: TESTED LOCALLY. Hosting target and current production deployment
+have not been verified. This update is not a complete security audit. Remaining
+work includes SSRF protection, request limits, exact identity matching, CRM write
+readback, full pagination, dependency review, and production acceptance.
